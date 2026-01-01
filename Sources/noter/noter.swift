@@ -10,6 +10,72 @@ struct Noter: ParsableCommand {
     )
 }
 
+// Shared utility functions
+func getNotesPath(from providedPath: String?) throws -> URL {
+    // Priority: 1. Command-line argument, 2. Environment variable, 3. Config file, 4. Default
+    if let providedPath = providedPath {
+        return URL(fileURLWithPath: providedPath)
+    }
+    
+    if let envPath = ProcessInfo.processInfo.environment["NOTER_PATH"] {
+        return URL(fileURLWithPath: envPath)
+    }
+    
+    // Try to read from config file in user's home directory
+    let homeDir = FileManager.default.homeDirectoryForCurrentUser
+    let configPath = homeDir.appendingPathComponent(".noterrc")
+    let configPrefix = "path="
+    
+    if let configData = try? Data(contentsOf: configPath),
+       let configString = String(data: configData, encoding: .utf8) {
+        let lines = configString.components(separatedBy: .newlines)
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix(configPrefix) {
+                let path = String(trimmed.dropFirst(configPrefix.count)).trimmingCharacters(in: .whitespaces)
+                return URL(fileURLWithPath: path)
+            }
+        }
+    }
+    
+    // Default to ~/notes
+    return homeDir.appendingPathComponent("notes")
+}
+
+func generateNoteFilename(in directory: URL) throws -> String {
+    let dateFormatter = DateFormatter()
+    dateFormatter.dateFormat = "yyyyMMdd"
+    let dateString = dateFormatter.string(from: Date())
+    
+    let fileManager = FileManager.default
+    var version = 0
+    let maxVersion = 1000
+    
+    // Find the next available version number
+    while version < maxVersion {
+        let filename = "\(dateString).\(version).md"
+        let fullPath = directory.appendingPathComponent(filename)
+        
+        if !fileManager.fileExists(atPath: fullPath.path) {
+            return filename
+        }
+        
+        version += 1
+    }
+    
+    throw CocoaError(.fileWriteFileExists, userInfo: [
+        NSLocalizedDescriptionKey: "Maximum number of notes (\(maxVersion)) reached for today"
+    ])
+}
+
+func formatEntry(content: String) -> String {
+    let timeFormatter = DateFormatter()
+    timeFormatter.dateFormat = "HH:mm"
+    let timeString = timeFormatter.string(from: Date())
+    
+    return "### \(timeString)\n\n\(content)\n\n"
+}
+
 extension Noter {
     struct New: ParsableCommand {
         static let configuration = CommandConfiguration(
@@ -23,7 +89,7 @@ extension Noter {
         var content: String?
         
         func run() throws {
-            let notesPath = try getNotesPath()
+            let notesPath = try getNotesPath(from: path)
             let noteFilename = try generateNoteFilename(in: notesPath)
             let noteFullPath = notesPath.appendingPathComponent(noteFilename)
             
@@ -46,63 +112,6 @@ extension Noter {
             } else {
                 throw CocoaError(.fileWriteUnknown)
             }
-        }
-        
-        private func getNotesPath() throws -> URL {
-            // Priority: 1. Command-line argument, 2. Environment variable, 3. Config file, 4. Default
-            if let providedPath = path {
-                return URL(fileURLWithPath: providedPath)
-            }
-            
-            if let envPath = ProcessInfo.processInfo.environment["NOTER_PATH"] {
-                return URL(fileURLWithPath: envPath)
-            }
-            
-            // Try to read from config file in user's home directory
-            let homeDir = FileManager.default.homeDirectoryForCurrentUser
-            let configPath = homeDir.appendingPathComponent(".noterrc")
-            let configPrefix = "path="
-            
-            if let configData = try? Data(contentsOf: configPath),
-               let configString = String(data: configData, encoding: .utf8) {
-                let lines = configString.components(separatedBy: .newlines)
-                for line in lines {
-                    let trimmed = line.trimmingCharacters(in: .whitespaces)
-                    if trimmed.hasPrefix(configPrefix) {
-                        let path = String(trimmed.dropFirst(configPrefix.count)).trimmingCharacters(in: .whitespaces)
-                        return URL(fileURLWithPath: path)
-                    }
-                }
-            }
-            
-            // Default to ~/notes
-            return homeDir.appendingPathComponent("notes")
-        }
-        
-        private func generateNoteFilename(in directory: URL) throws -> String {
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "yyyyMMdd"
-            let dateString = dateFormatter.string(from: Date())
-            
-            let fileManager = FileManager.default
-            var version = 0
-            let maxVersion = 1000
-            
-            // Find the next available version number
-            while version < maxVersion {
-                let filename = "\(dateString).\(version).md"
-                let fullPath = directory.appendingPathComponent(filename)
-                
-                if !fileManager.fileExists(atPath: fullPath.path) {
-                    return filename
-                }
-                
-                version += 1
-            }
-            
-            throw CocoaError(.fileWriteFileExists, userInfo: [
-                NSLocalizedDescriptionKey: "Maximum number of notes (\(maxVersion)) reached for today"
-            ])
         }
     }
     
@@ -130,7 +139,7 @@ extension Noter {
                 throw ValidationError("Cannot specify both content and a file")
             }
             
-            let notesPath = try getNotesPath()
+            let notesPath = try getNotesPath(from: path)
             
             // Find the most recent note or create a new one
             let noteFullPath: URL
@@ -166,8 +175,11 @@ extension Noter {
                     ])
                 }
                 contentToAppend = fileContent
+            } else if let textContent = content {
+                contentToAppend = textContent
             } else {
-                contentToAppend = content!
+                // This should never happen due to validation above, but Swift requires handling
+                throw ValidationError("Either content or a file must be provided")
             }
             
             // Append the entry to the note
@@ -218,71 +230,5 @@ extension Noter {
             
             return sortedFiles.first
         }
-        
-        private func getNotesPath() throws -> URL {
-            // Priority: 1. Command-line argument, 2. Environment variable, 3. Config file, 4. Default
-            if let providedPath = path {
-                return URL(fileURLWithPath: providedPath)
-            }
-            
-            if let envPath = ProcessInfo.processInfo.environment["NOTER_PATH"] {
-                return URL(fileURLWithPath: envPath)
-            }
-            
-            // Try to read from config file in user's home directory
-            let homeDir = FileManager.default.homeDirectoryForCurrentUser
-            let configPath = homeDir.appendingPathComponent(".noterrc")
-            let configPrefix = "path="
-            
-            if let configData = try? Data(contentsOf: configPath),
-               let configString = String(data: configData, encoding: .utf8) {
-                let lines = configString.components(separatedBy: .newlines)
-                for line in lines {
-                    let trimmed = line.trimmingCharacters(in: .whitespaces)
-                    if trimmed.hasPrefix(configPrefix) {
-                        let path = String(trimmed.dropFirst(configPrefix.count)).trimmingCharacters(in: .whitespaces)
-                        return URL(fileURLWithPath: path)
-                    }
-                }
-            }
-            
-            // Default to ~/notes
-            return homeDir.appendingPathComponent("notes")
-        }
-        
-        private func generateNoteFilename(in directory: URL) throws -> String {
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "yyyyMMdd"
-            let dateString = dateFormatter.string(from: Date())
-            
-            let fileManager = FileManager.default
-            var version = 0
-            let maxVersion = 1000
-            
-            // Find the next available version number
-            while version < maxVersion {
-                let filename = "\(dateString).\(version).md"
-                let fullPath = directory.appendingPathComponent(filename)
-                
-                if !fileManager.fileExists(atPath: fullPath.path) {
-                    return filename
-                }
-                
-                version += 1
-            }
-            
-            throw CocoaError(.fileWriteFileExists, userInfo: [
-                NSLocalizedDescriptionKey: "Maximum number of notes (\(maxVersion)) reached for today"
-            ])
-        }
     }
-}
-
-// Shared utility function
-func formatEntry(content: String) -> String {
-    let timeFormatter = DateFormatter()
-    timeFormatter.dateFormat = "HH:mm"
-    let timeString = timeFormatter.string(from: Date())
-    
-    return "### \(timeString)\n\n\(content)\n\n"
 }
