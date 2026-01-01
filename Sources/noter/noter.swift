@@ -51,14 +51,15 @@ extension Noter {
             // Try to read from config file in user's home directory
             let homeDir = FileManager.default.homeDirectoryForCurrentUser
             let configPath = homeDir.appendingPathComponent(".noterrc")
+            let configPrefix = "path="
             
             if let configData = try? Data(contentsOf: configPath),
                let configString = String(data: configData, encoding: .utf8) {
                 let lines = configString.components(separatedBy: .newlines)
                 for line in lines {
                     let trimmed = line.trimmingCharacters(in: .whitespaces)
-                    if trimmed.hasPrefix("path=") {
-                        let path = String(trimmed.dropFirst(5)).trimmingCharacters(in: .whitespaces)
+                    if trimmed.hasPrefix(configPrefix) {
+                        let path = String(trimmed.dropFirst(configPrefix.count)).trimmingCharacters(in: .whitespaces)
                         return URL(fileURLWithPath: path)
                     }
                 }
@@ -75,9 +76,10 @@ extension Noter {
             
             let fileManager = FileManager.default
             var version = 0
+            let maxVersion = 1000
             
             // Find the next available version number
-            while true {
+            while version < maxVersion {
                 let filename = "\(dateString).\(version).md"
                 let fullPath = directory.appendingPathComponent(filename)
                 
@@ -87,6 +89,10 @@ extension Noter {
                 
                 version += 1
             }
+            
+            throw CocoaError(.fileWriteFileExists, userInfo: [
+                NSLocalizedDescriptionKey: "Maximum number of notes (\(maxVersion)) reached for today"
+            ])
         }
     }
 }
