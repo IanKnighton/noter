@@ -219,14 +219,37 @@ extension Noter {
             // Get all markdown files in the directory
             let files = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey], options: .skipsHiddenFiles)
             
-            // Filter for .md files and sort by creation date
+            // Filter for .md files
             let mdFiles = files.filter { $0.pathExtension == "md" }
             guard !mdFiles.isEmpty else {
                 return nil
             }
             
-            // Sort by filename (which includes date) in descending order
-            let sortedFiles = mdFiles.sorted { $0.lastPathComponent > $1.lastPathComponent }
+            // Sort by parsing the filename format: yyyyMMdd.v.md
+            let sortedFiles = mdFiles.sorted { file1, file2 in
+                let name1 = file1.deletingPathExtension().lastPathComponent
+                let name2 = file2.deletingPathExtension().lastPathComponent
+                
+                let parts1 = name1.split(separator: ".")
+                let parts2 = name2.split(separator: ".")
+                
+                // Compare date first
+                if parts1.count >= 1 && parts2.count >= 1 {
+                    if parts1[0] != parts2[0] {
+                        return parts1[0] > parts2[0]
+                    }
+                    
+                    // If dates are equal, compare version numbers
+                    if parts1.count >= 2 && parts2.count >= 2,
+                       let v1 = Int(parts1[1]),
+                       let v2 = Int(parts2[1]) {
+                        return v1 > v2
+                    }
+                }
+                
+                // Fallback to string comparison
+                return name1 > name2
+            }
             
             return sortedFiles.first
         }
