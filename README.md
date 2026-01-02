@@ -94,6 +94,10 @@ This will combine all notes that have multiple versions for the same day into a 
 ```markdown
 # MM-DD-YYYY
 
+## AI Summary
+
+{AI-GENERATED SUMMARY (if OPENAI_API_KEY is set)}
+
 ---
 
 {FILE .0 ENTRIES}
@@ -108,6 +112,23 @@ This will combine all notes that have multiple versions for the same day into a 
 ```
 
 By default, the original separate files are deleted after combining.
+
+#### AI Summary
+
+If you have an `OPENAI_API_KEY` environment variable set, noter will automatically generate an AI summary of your combined notes and place it at the top of the file. The summary provides a brief overview of your day's notes and highlights any potential action items.
+
+To skip the AI summary generation even when you have an API key configured:
+
+```bash
+noter combine --no-ai
+```
+
+You can customize the AI prompt by adding an `ai_prompt` configuration to your `~/.noterrc` file:
+
+```
+path=/path/to/notes
+ai_prompt=Your custom prompt for the AI summary
+```
 
 #### Combine only today's notes
 
@@ -129,6 +150,8 @@ You can also combine these options:
 
 ```bash
 noter combine today --keep
+noter combine today --no-ai
+noter combine --keep --no-ai
 ```
 
 This will combine only today's notes and keep the original files.
@@ -157,9 +180,19 @@ There are three ways to specify where notes should be stored, in order of priori
    Create a file at `~/.noterrc` with the following content:
    ```
    path=/path/to/notes
+   ai_prompt=Your custom AI prompt (optional)
    ```
+   
+   Available configuration options:
+   - `path`: Directory where notes should be stored
+   - `ai_prompt`: Custom prompt for AI summary generation (optional)
 
 4. **Default**: If no path is specified, notes will be stored in `~/notes`
+
+### Environment Variables
+
+- `NOTER_PATH`: Specifies the directory where notes should be stored
+- `OPENAI_API_KEY`: Required for AI summary generation. If not set, the combine command will work without AI summaries.
 
 ## Help
 
