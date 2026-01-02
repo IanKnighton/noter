@@ -1,5 +1,8 @@
 import ArgumentParser
 import Foundation
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
 
 @main
 struct Noter: ParsableCommand {
@@ -12,6 +15,186 @@ struct Noter: ParsableCommand {
 
 // Shared utility functions
 let maxNoteVersions = 1000
+
+let defaultAIPrompt = """
+# IDENTITY
+
+You are an expert techincal writer reading a collection of notes from an engineer to provide a summary of what they've documented throughout the day. 
+
+# GOAL
+
+Produce a brief summary and accurate assesment of the notes while highlighting any technical information as well as any possible action items.
+
+# STEPS
+
+Read each note and all of it's contents. Determine what the comment is about and if there are any potential action items. Do this for all notes and then combine commonalities and potential action items.
+
+# OUTPUT
+
+A brief (5 sentences or less) summary of all of the notes.
+
+If applicable, a section called "Action Items" that lists any potential action items from the notes.
+"""
+
+func getAIPrompt() -> String {
+    // Try to read from config file in user's home directory
+    let homeDir = FileManager.default.homeDirectoryForCurrentUser
+    let configPath = homeDir.appendingPathComponent(".noterrc")
+    let configPrefix = "ai_prompt="
+    
+    if let configData = try? Data(contentsOf: configPath),
+       let configString = String(data: configData, encoding: .utf8) {
+        let lines = configString.components(separatedBy: .newlines)
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix(configPrefix) {
+                let prompt = String(trimmed.dropFirst(configPrefix.count)).trimmingCharacters(in: .whitespaces)
+                if !prompt.isEmpty {
+                    return prompt
+                }
+            }
+        }
+    }
+    
+    return defaultAIPrompt
+}
+
+func generateAISummary(for content: String) async throws -> String? {
+    // Check if OpenAI API key is set
+    guard let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"], !apiKey.isEmpty else {
+        return nil
+    }
+    
+    let prompt = getAIPrompt()
+    
+    // Prepare the API request
+    let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    
+    let requestBody: [String: Any] = [
+        "model": "gpt-3.5-turbo",
+        "messages": [
+            ["role": "system", "content": prompt],
+            ["role": "user", "content": content]
+        ],
+        "temperature": 0.7
+    ]
+    
+    request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
+    
+    // Make the API request
+    let (data, response) = try await URLSession.shared.data(for: request)
+    
+    guard let httpResponse = response as? HTTPURLResponse else {
+        throw CocoaError(.fileReadUnknown)
+    }
+    
+    guard httpResponse.statusCode == 200 else {
+        print("Warning: OpenAI API request failed with status code \(httpResponse.statusCode)")
+        return nil
+    }
+    
+    // Parse the response
+    guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let choices = json["choices"] as? [[String: Any]],
+          let firstChoice = choices.first,
+          let message = firstChoice["message"] as? [String: Any],
+          let summary = message["content"] as? String else {
+        print("Warning: Could not parse OpenAI API response")
+        return nil
+    }
+    
+    return summary.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+func generateAISummarySync(for content: String) -> String? {
+    // Check if OpenAI API key is set
+    guard let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"], !apiKey.isEmpty else {
+        return nil
+    }
+    
+    let prompt = getAIPrompt()
+    
+    // Prepare the API request
+    let url = URL(string: "https://api.openai.com/v1/chat/completions")!
+    var request = URLRequest(url: url)
+    request.httpMethod = "POST"
+    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    
+    let requestBody: [String: Any] = [
+        "model": "gpt-3.5-turbo",
+        "messages": [
+            ["role": "system", "content": prompt],
+            ["role": "user", "content": content]
+        ],
+        "temperature": 0.7
+    ]
+    
+    guard let httpBody = try? JSONSerialization.data(withJSONObject: requestBody) else {
+        return nil
+    }
+    request.httpBody = httpBody
+    
+    // Use a semaphore to make this synchronous
+    let semaphore = DispatchSemaphore(value: 0)
+    
+    // Use @unchecked Sendable to work around Swift 6 concurrency restrictions
+    final class ResultBox: @unchecked Sendable {
+        var value: String?
+        let lock = NSLock()
+        
+        func set(_ newValue: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            value = newValue
+        }
+        
+        func get() -> String? {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+    }
+    let resultBox = ResultBox()
+    
+    let task = URLSession.shared.dataTask(with: request) { data, response, error in
+        defer { semaphore.signal() }
+        
+        guard error == nil,
+              let data = data,
+              let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            if let error = error {
+                print("Warning: OpenAI API request failed: \(error.localizedDescription)")
+            } else if let httpResponse = response as? HTTPURLResponse {
+                print("Warning: OpenAI API request failed with status code \(httpResponse.statusCode)")
+            }
+            return
+        }
+        
+        // Parse the response
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let choices = json["choices"] as? [[String: Any]],
+              let firstChoice = choices.first,
+              let message = firstChoice["message"] as? [String: Any],
+              let summary = message["content"] as? String else {
+            print("Warning: Could not parse OpenAI API response")
+            return
+        }
+        
+        resultBox.set(summary.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    
+    task.resume()
+    semaphore.wait()
+    
+    return resultBox.get()
+}
+
 
 func getNotesPath(from providedPath: String?) throws -> URL {
     // Priority: 1. Command-line argument, 2. Environment variable, 3. Config file, 4. Default
@@ -267,6 +450,9 @@ extension Noter {
         @Flag(name: .long, help: "Keep the original files after combining")
         var keep: Bool = false
         
+        @Flag(name: .long, help: "Skip AI summary generation")
+        var noAi: Bool = false
+        
         @Argument(help: "Specify 'today' to combine only today's notes")
         var filter: String?
         
@@ -359,23 +545,37 @@ extension Noter {
                 // Build combined content
                 var combinedContent = "# \(headerDate)\n\n"
                 
+                // Collect all note content first
+                var allNotesContent = ""
                 for (index, note) in sortedNotes.enumerated() {
                     if index > 0 {
-                        combinedContent += "---\n\n"
+                        allNotesContent += "---\n\n"
                     }
                     
                     // Read the content of this note
                     do {
                         let noteContent = try String(contentsOf: note.url, encoding: .utf8)
-                        combinedContent += noteContent
+                        allNotesContent += noteContent
                         if !noteContent.hasSuffix("\n") {
-                            combinedContent += "\n"
+                            allNotesContent += "\n"
                         }
                     } catch {
                         print("Warning: Could not read file \(note.url.path): \(error.localizedDescription)")
                         continue
                     }
                 }
+                
+                // Generate AI summary if conditions are met
+                if !noAi {
+                    if let aiSummary = generateAISummarySync(for: allNotesContent) {
+                        combinedContent += "## AI Summary\n\n"
+                        combinedContent += aiSummary
+                        combinedContent += "\n\n---\n\n"
+                    }
+                }
+                
+                // Add the actual notes content
+                combinedContent += allNotesContent
                 
                 // Determine the output filename
                 let combinedFilename = "\(dateString).0.md"
