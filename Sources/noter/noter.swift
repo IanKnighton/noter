@@ -6,7 +6,7 @@ struct Noter: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "noter",
         abstract: "A note-taking application",
-        subcommands: [New.self, Add.self]
+        subcommands: [New.self, Add.self, Combine.self]
     )
 }
 
@@ -252,6 +252,178 @@ extension Noter {
             }
             
             return sortedFiles.first
+        }
+    }
+    
+    struct Combine: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Combine notes from a day into a single file"
+        )
+        
+        @Option(name: .shortAndLong, help: "Path where notes should be stored")
+        var path: String?
+        
+        @Flag(name: .long, help: "Keep the original files after combining")
+        var keep: Bool = false
+        
+        @Argument(help: "Specify 'today' to combine only today's notes")
+        var filter: String?
+        
+        func run() throws {
+            let notesPath = try getNotesPath(from: path)
+            let fileManager = FileManager.default
+            
+            // Check if directory exists
+            guard fileManager.fileExists(atPath: notesPath.path) else {
+                print("Notes directory does not exist: \(notesPath.path)")
+                return
+            }
+            
+            // Validate filter argument
+            if let filter = filter, filter != "today" {
+                throw ValidationError("Invalid argument: '\(filter)'. Use 'today' or no argument to combine all notes.")
+            }
+            
+            // Get all markdown files
+            let files = try fileManager.contentsOfDirectory(at: notesPath, includingPropertiesForKeys: nil, options: .skipsHiddenFiles)
+            let mdFiles = files.filter { $0.pathExtension == "md" }
+            
+            guard !mdFiles.isEmpty else {
+                print("No notes found in: \(notesPath.path)")
+                return
+            }
+            
+            // Parse filenames to group by date: yyyyMMdd.v.md
+            var notesByDate: [String: [(version: Int, url: URL)]] = [:]
+            
+            for file in mdFiles {
+                let filename = file.deletingPathExtension().lastPathComponent
+                let parts = filename.split(separator: ".")
+                
+                // Skip files that don't match the expected format
+                guard parts.count == 2,
+                      let version = Int(parts[1]) else {
+                    continue
+                }
+                
+                let dateString = String(parts[0])
+                
+                // Filter by today if specified
+                if filter == "today" {
+                    let dateFormatter = DateFormatter()
+                    dateFormatter.dateFormat = "yyyyMMdd"
+                    let todayString = dateFormatter.string(from: Date())
+                    
+                    if dateString != todayString {
+                        continue
+                    }
+                }
+                
+                if notesByDate[dateString] == nil {
+                    notesByDate[dateString] = []
+                }
+                notesByDate[dateString]?.append((version: version, url: file))
+            }
+            
+            guard !notesByDate.isEmpty else {
+                if filter == "today" {
+                    print("No notes found for today")
+                } else {
+                    print("No notes found to combine")
+                }
+                return
+            }
+            
+            // Process each date
+            var combinedCount = 0
+            for (dateString, notesArray) in notesByDate {
+                // Only combine if there are multiple notes for this date
+                guard notesArray.count > 1 else {
+                    continue
+                }
+                
+                // Sort by version number
+                let sortedNotes = notesArray.sorted { $0.version < $1.version }
+                
+                // Parse date for header
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyyMMdd"
+                
+                var headerDate = dateString
+                if let date = dateFormatter.date(from: dateString) {
+                    dateFormatter.dateFormat = "MM-dd-yyyy"
+                    headerDate = dateFormatter.string(from: date)
+                }
+                
+                // Build combined content
+                var combinedContent = "# \(headerDate)\n\n"
+                
+                for (index, note) in sortedNotes.enumerated() {
+                    if index > 0 {
+                        combinedContent += "---\n\n"
+                    }
+                    
+                    // Read the content of this note
+                    if let noteContent = try? String(contentsOf: note.url, encoding: .utf8) {
+                        combinedContent += noteContent
+                        if !noteContent.hasSuffix("\n") {
+                            combinedContent += "\n"
+                        }
+                    }
+                }
+                
+                // Determine the output filename
+                let combinedFilename = "\(dateString).0.md"
+                let combinedPath = notesPath.appendingPathComponent(combinedFilename)
+                
+                // Check if we're keeping files - if so, find next available version
+                let finalPath: URL
+                if keep {
+                    // Find the next available version number that doesn't exist
+                    var version = 0
+                    let maxVersion = 1000
+                    var foundPath: URL?
+                    
+                    while version < maxVersion {
+                        let testFilename = "\(dateString).\(version).md"
+                        let testPath = notesPath.appendingPathComponent(testFilename)
+                        
+                        if !fileManager.fileExists(atPath: testPath.path) {
+                            foundPath = testPath
+                            break
+                        }
+                        version += 1
+                    }
+                    
+                    guard let path = foundPath else {
+                        print("Error: Could not find available version number for \(dateString)")
+                        continue
+                    }
+                    finalPath = path
+                } else {
+                    finalPath = combinedPath
+                }
+                
+                // Write the combined content
+                try combinedContent.write(to: finalPath, atomically: true, encoding: .utf8)
+                print("Combined \(sortedNotes.count) notes into: \(finalPath.path)")
+                
+                // Delete original files if not keeping
+                if !keep {
+                    for note in sortedNotes {
+                        // Don't delete the file we just created
+                        if note.url.path != finalPath.path {
+                            try fileManager.removeItem(at: note.url)
+                        }
+                    }
+                }
+                
+                combinedCount += 1
+            }
+            
+            if combinedCount == 0 {
+                print("No dates with multiple notes found to combine")
+            }
         }
     }
 }
