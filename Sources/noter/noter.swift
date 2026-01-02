@@ -11,6 +11,8 @@ struct Noter: ParsableCommand {
 }
 
 // Shared utility functions
+let maxNoteVersions = 1000
+
 func getNotesPath(from providedPath: String?) throws -> URL {
     // Priority: 1. Command-line argument, 2. Environment variable, 3. Config file, 4. Default
     if let providedPath = providedPath {
@@ -49,10 +51,9 @@ func generateNoteFilename(in directory: URL) throws -> String {
     
     let fileManager = FileManager.default
     var version = 0
-    let maxVersion = 1000
     
     // Find the next available version number
-    while version < maxVersion {
+    while version < maxNoteVersions {
         let filename = "\(dateString).\(version).md"
         let fullPath = directory.appendingPathComponent(filename)
         
@@ -64,7 +65,7 @@ func generateNoteFilename(in directory: URL) throws -> String {
     }
     
     throw CocoaError(.fileWriteFileExists, userInfo: [
-        NSLocalizedDescriptionKey: "Maximum number of notes (\(maxVersion)) reached for today"
+        NSLocalizedDescriptionKey: "Maximum number of notes (\(maxNoteVersions)) reached for today"
     ])
 }
 
@@ -364,11 +365,15 @@ extension Noter {
                     }
                     
                     // Read the content of this note
-                    if let noteContent = try? String(contentsOf: note.url, encoding: .utf8) {
+                    do {
+                        let noteContent = try String(contentsOf: note.url, encoding: .utf8)
                         combinedContent += noteContent
                         if !noteContent.hasSuffix("\n") {
                             combinedContent += "\n"
                         }
+                    } catch {
+                        print("Warning: Could not read file \(note.url.path): \(error.localizedDescription)")
+                        continue
                     }
                 }
                 
@@ -381,10 +386,9 @@ extension Noter {
                 if keep {
                     // Find the next available version number that doesn't exist
                     var version = 0
-                    let maxVersion = 1000
                     var foundPath: URL?
                     
-                    while version < maxVersion {
+                    while version < maxNoteVersions {
                         let testFilename = "\(dateString).\(version).md"
                         let testPath = notesPath.appendingPathComponent(testFilename)
                         
