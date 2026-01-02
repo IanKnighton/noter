@@ -1,0 +1,233 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
+      arm64_sonoma_sha: ${{ steps.bottle_sha.outputs.ARM64_SONOMA_SHA }}
+      arm64_monterey_sha: ${{ steps.bottle_sha.outputs.ARM64_MONTEREY_SHA }}
+      arm64_tahoe_sha: ${{ steps.bottle_sha.outputs.ARM64_TAHOE_SHA }}
+      arm64_sequoia_sha: ${{ steps.bottle_sha.outputs.ARM64_SEQUOIA_SHA }}
+      x86_64_sonoma_sha: ${{ steps.bottle_sha.outputs.X86_64_SONOMA_SHA }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Swift
+        uses: swift-actions/setup-swift@v2
+
+      - name: Build Release Binary
+        run: |
+          # Extract version from git tag and embed it in the binary
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "Building noter version: $VERSION"
+          # Set NOTER_VERSION environment variable for version embedding
+          NOTER_VERSION="$VERSION" swift build -c release
+          cd .build/release
+          tar -czf noter-macos.tar.gz noter
+          shasum -a 256 noter-macos.tar.gz > noter-macos.tar.gz.sha256
+
+      - name: Create Homebrew Bottle
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          # Create a bottle structure that Homebrew expects
+          mkdir -p bottle-staging/noter/$VERSION/bin
+          cp .build/release/noter bottle-staging/noter/$VERSION/bin/
+
+          # Create the bottle tarball
+          cd bottle-staging
+          tar -czf ../noter-$VERSION.arm64_sonoma.bottle.tar.gz .
+          cd ..
+
+          # Calculate bottle SHA256
+          shasum -a 256 noter-$VERSION.arm64_sonoma.bottle.tar.gz > noter-$VERSION.arm64_sonoma.bottle.tar.gz.sha256
+
+          # Also create bottles for other macOS versions (same binary, different name for compatibility)
+          cp noter-$VERSION.arm64_sonoma.bottle.tar.gz noter-$VERSION.arm64_monterey.bottle.tar.gz
+          shasum -a 256 noter-$VERSION.arm64_monterey.bottle.tar.gz > noter-$VERSION.arm64_monterey.bottle.tar.gz.sha256
+
+          cp noter-$VERSION.arm64_sonoma.bottle.tar.gz noter-$VERSION.arm64_tahoe.bottle.tar.gz
+          shasum -a 256 noter-$VERSION.arm64_tahoe.bottle.tar.gz > noter-$VERSION.arm64_tahoe.bottle.tar.gz.sha256
+
+          cp noter-$VERSION.arm64_sonoma.bottle.tar.gz noter-$VERSION.arm64_sequoia.bottle.tar.gz
+          shasum -a 256 noter-$VERSION.arm64_sequoia.bottle.tar.gz > noter-$VERSION.arm64_sequoia.bottle.tar.gz.sha256
+
+          # Create bottle for x86_64 (Intel Macs) - same binary works for both architectures
+          cp noter-$VERSION.arm64_sonoma.bottle.tar.gz noter-$VERSION.x86_64_sonoma.bottle.tar.gz
+          shasum -a 256 noter-$VERSION.x86_64_sonoma.bottle.tar.gz > noter-$VERSION.x86_64_sonoma.bottle.tar.gz.sha256
+
+      - name: Calculate bottle SHA256s
+        id: bottle_sha
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+
+          # Calculate SHA256 for each bottle file we just created
+          ARM64_SONOMA_SHA=$(shasum -a 256 noter-${VERSION}.arm64_sonoma.bottle.tar.gz | awk '{print $1}')
+          echo "ARM64_SONOMA_SHA=${ARM64_SONOMA_SHA}" >> $GITHUB_OUTPUT
+
+          ARM64_MONTEREY_SHA=$(shasum -a 256 noter-${VERSION}.arm64_monterey.bottle.tar.gz | awk '{print $1}')
+          echo "ARM64_MONTEREY_SHA=${ARM64_MONTEREY_SHA}" >> $GITHUB_OUTPUT
+
+          ARM64_TAHOE_SHA=$(shasum -a 256 noter-${VERSION}.arm64_tahoe.bottle.tar.gz | awk '{print $1}')
+          echo "ARM64_TAHOE_SHA=${ARM64_TAHOE_SHA}" >> $GITHUB_OUTPUT
+
+          ARM64_SEQUOIA_SHA=$(shasum -a 256 noter-${VERSION}.arm64_sequoia.bottle.tar.gz | awk '{print $1}')
+          echo "ARM64_SEQUOIA_SHA=${ARM64_SEQUOIA_SHA}" >> $GITHUB_OUTPUT
+
+          X86_64_SONOMA_SHA=$(shasum -a 256 noter-${VERSION}.x86_64_sonoma.bottle.tar.gz | awk '{print $1}')
+          echo "X86_64_SONOMA_SHA=${X86_64_SONOMA_SHA}" >> $GITHUB_OUTPUT
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            .build/release/noter-macos.tar.gz
+            .build/release/noter-macos.tar.gz.sha256
+            noter-${{ steps.version.outputs.VERSION }}.arm64_sonoma.bottle.tar.gz
+            noter-${{ steps.version.outputs.VERSION }}.arm64_sonoma.bottle.tar.gz.sha256
+            noter-${{ steps.version.outputs.VERSION }}.arm64_monterey.bottle.tar.gz
+            noter-${{ steps.version.outputs.VERSION }}.arm64_monterey.bottle.tar.gz.sha256
+            noter-${{ steps.version.outputs.VERSION }}.arm64_tahoe.bottle.tar.gz
+            noter-${{ steps.version.outputs.VERSION }}.arm64_tahoe.bottle.tar.gz.sha256
+            noter-${{ steps.version.outputs.VERSION }}.arm64_sequoia.bottle.tar.gz
+            noter-${{ steps.version.outputs.VERSION }}.arm64_sequoia.bottle.tar.gz.sha256
+            noter-${{ steps.version.outputs.VERSION }}.x86_64_sonoma.bottle.tar.gz
+            noter-${{ steps.version.outputs.VERSION }}.x86_64_sonoma.bottle.tar.gz.sha256
+          body: |
+            ## Installation
+
+            ### Homebrew (Recommended)
+            ```bash
+            brew tap IanKnighton/homebrew-tap
+            brew install noter
+            ```
+
+            Or update if already installed:
+            ```bash
+            brew upgrade noter
+            ```
+
+            **Note:** This release includes Homebrew bottles for faster installation without compilation.
+
+            ### Manual Installation
+            ```bash
+            VERSION=${{ steps.version.outputs.VERSION }}
+            DOWNLOAD_URL="https://github.com/IanKnighton/noter"
+            DOWNLOAD_URL="${DOWNLOAD_URL}/releases/download/${VERSION}/noter-macos.tar.gz"
+            curl -L "${DOWNLOAD_URL}" | tar xz
+            sudo mv noter /usr/local/bin/
+            ```
+
+            ## What's Changed
+            See the commit history for details.
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-formula:
+    needs: release
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout homebrew-tap repository
+        uses: actions/checkout@v4
+        with:
+          repository: IanKnighton/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${{ needs.release.outputs.version }}" >> $GITHUB_OUTPUT
+
+      - name: Download and calculate SHA256
+        id: sha
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          TARBALL_URL="https://github.com/IanKnighton/noter/archive/refs/tags/${VERSION}.tar.gz"
+          curl -sL "${TARBALL_URL}" -o source.tar.gz
+          SHA256=$(shasum -a 256 source.tar.gz | awk '{print $1}')
+          echo "SHA256=${SHA256}" >> $GITHUB_OUTPUT
+          rm source.tar.gz
+
+      - name: Update Homebrew Formula
+        run: |
+          VERSION="${{ needs.release.outputs.version }}"
+          SHA256="${{ steps.sha.outputs.SHA256 }}"
+          TARBALL_URL="https://github.com/IanKnighton/noter/archive/refs/tags/${VERSION}.tar.gz"
+
+          # Bottle SHA256s from release job outputs
+          ARM64_SONOMA_SHA="${{ needs.release.outputs.arm64_sonoma_sha }}"
+          ARM64_MONTEREY_SHA="${{ needs.release.outputs.arm64_monterey_sha }}"
+          ARM64_TAHOE_SHA="${{ needs.release.outputs.arm64_tahoe_sha }}"
+          ARM64_SEQUOIA_SHA="${{ needs.release.outputs.arm64_sequoia_sha }}"
+          X86_64_SONOMA_SHA="${{ needs.release.outputs.x86_64_sonoma_sha }}"
+
+          cd homebrew-tap
+          mkdir -p Formula
+
+          # Always create/recreate the formula file to ensure bottles are included
+          cat > Formula/noter.rb << EOF
+          class Noter < Formula
+            desc "A Swift CLI for managing notes"
+            homepage "https://github.com/IanKnighton/noter"
+            url "${TARBALL_URL}"
+            sha256 "${SHA256}"
+            license "MIT"
+
+            bottle do
+              root_url "https://github.com/IanKnighton/noter/releases/download/${VERSION}"
+              sha256 cellar: :any_skip_relocation, arm64_sequoia:  "${ARM64_SEQUOIA_SHA}"
+              sha256 cellar: :any_skip_relocation, arm64_tahoe:    "${ARM64_TAHOE_SHA}"
+              sha256 cellar: :any_skip_relocation, arm64_sonoma:   "${ARM64_SONOMA_SHA}"
+              sha256 cellar: :any_skip_relocation, arm64_monterey: "${ARM64_MONTEREY_SHA}"
+              sha256 cellar: :any_skip_relocation, x86_64_sonoma:  "${X86_64_SONOMA_SHA}"
+            end
+
+            depends_on xcode: ["12.0", :build]
+            depends_on :macos
+
+            def install
+              # Set version for embedding in binary during build
+              version_string = version.to_s
+              ENV["NOTER_VERSION"] = version_string
+              system "swift", "build", "-c", "release", "--disable-sandbox"
+              bin.install ".build/release/noter"
+            end
+
+            test do
+              system "#{bin}/noter", "--version"
+            end
+          end
+          EOF
+
+      - name: Commit and push changes
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/noter.rb
+          if git diff-index --quiet HEAD; then
+            echo "No changes to commit"
+          else
+            VERSION="${{ needs.release.outputs.version }}"
+            git commit -m "Update noter formula to ${VERSION}"
+            git push origin main
+          fi

@@ -3,6 +3,22 @@ An application that helps you take notes. It's silly, but it scratched an itch a
 
 ## Installation
 
+### Homebrew (Recommended)
+
+The easiest way to install noter is via Homebrew:
+
+```bash
+brew tap IanKnighton/homebrew-tap
+brew install noter
+```
+
+To upgrade to the latest version:
+```bash
+brew upgrade noter
+```
+
+### Manual Installation
+
 Build the application using Swift Package Manager:
 
 ```bash
