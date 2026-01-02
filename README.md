@@ -83,6 +83,56 @@ noter add -f path/to/file.md
 
 This will read the markdown file and append it to the most recent note with a timestamp header.
 
+### Combining notes
+
+```bash
+noter combine
+```
+
+This will combine all notes that have multiple versions for the same day into a single file. For example, if you have `20260102.0.md`, `20260102.1.md`, and `20260102.2.md`, they will be combined into a single `20260102.0.md` file with the format:
+
+```markdown
+# MM-DD-YYYY
+
+---
+
+{FILE .0 ENTRIES}
+
+---
+
+{FILE .1 ENTRIES}
+
+---
+
+{FILE .2 ENTRIES}
+```
+
+By default, the original separate files are deleted after combining.
+
+#### Combine only today's notes
+
+```bash
+noter combine today
+```
+
+This will only combine notes created today, leaving notes from other days unchanged.
+
+#### Keep original files
+
+```bash
+noter combine --keep
+```
+
+This will create a new combined file while preserving the original separate files. The combined file will use the next available version number.
+
+You can also combine these options:
+
+```bash
+noter combine today --keep
+```
+
+This will combine only today's notes and keep the original files.
+
 ### Specifying the notes directory
 
 There are three ways to specify where notes should be stored, in order of priority:
@@ -92,6 +142,7 @@ There are three ways to specify where notes should be stored, in order of priori
    noter new --path /path/to/notes
    noter new -p /path/to/notes
    noter add -p /path/to/notes "Content"
+   noter combine -p /path/to/notes
    ```
 
 2. **Environment variable**:
@@ -99,6 +150,7 @@ There are three ways to specify where notes should be stored, in order of priori
    export NOTER_PATH=/path/to/notes
    noter new
    noter add "Content"
+   noter combine
    ```
 
 3. **Configuration file** (`~/.noterrc`):
@@ -117,4 +169,5 @@ To see all available commands and options:
 noter --help
 noter new --help
 noter add --help
+noter combine --help
 ``` 
