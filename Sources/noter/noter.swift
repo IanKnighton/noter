@@ -19,15 +19,15 @@ let maxNoteVersions = 1000
 let defaultAIPrompt = """
 # IDENTITY
 
-You are an expert techincal writer reading a collection of notes from an engineer to provide a summary of what they've documented throughout the day. 
+You are an expert technical writer reading a collection of notes from an engineer to provide a summary of what they've documented throughout the day. 
 
 # GOAL
 
-Produce a brief summary and accurate assesment of the notes while highlighting any technical information as well as any possible action items.
+Produce a brief summary and accurate assessment of the notes while highlighting any technical information as well as any possible action items.
 
 # STEPS
 
-Read each note and all of it's contents. Determine what the comment is about and if there are any potential action items. Do this for all notes and then combine commonalities and potential action items.
+Read each note and all of its contents. Determine what the comment is about and if there are any potential action items. Do this for all notes and then combine commonalities and potential action items.
 
 # OUTPUT
 
@@ -57,57 +57,6 @@ func getAIPrompt() -> String {
     }
     
     return defaultAIPrompt
-}
-
-func generateAISummary(for content: String) async throws -> String? {
-    // Check if OpenAI API key is set
-    guard let apiKey = ProcessInfo.processInfo.environment["OPENAI_API_KEY"], !apiKey.isEmpty else {
-        return nil
-    }
-    
-    let prompt = getAIPrompt()
-    
-    // Prepare the API request
-    let url = URL(string: "https://api.openai.com/v1/chat/completions")!
-    var request = URLRequest(url: url)
-    request.httpMethod = "POST"
-    request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    
-    let requestBody: [String: Any] = [
-        "model": "gpt-3.5-turbo",
-        "messages": [
-            ["role": "system", "content": prompt],
-            ["role": "user", "content": content]
-        ],
-        "temperature": 0.7
-    ]
-    
-    request.httpBody = try JSONSerialization.data(withJSONObject: requestBody)
-    
-    // Make the API request
-    let (data, response) = try await URLSession.shared.data(for: request)
-    
-    guard let httpResponse = response as? HTTPURLResponse else {
-        throw CocoaError(.fileReadUnknown)
-    }
-    
-    guard httpResponse.statusCode == 200 else {
-        print("Warning: OpenAI API request failed with status code \(httpResponse.statusCode)")
-        return nil
-    }
-    
-    // Parse the response
-    guard let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let choices = json["choices"] as? [[String: Any]],
-          let firstChoice = choices.first,
-          let message = firstChoice["message"] as? [String: Any],
-          let summary = message["content"] as? String else {
-        print("Warning: Could not parse OpenAI API response")
-        return nil
-    }
-    
-    return summary.trimmingCharacters(in: .whitespacesAndNewlines)
 }
 
 func generateAISummarySync(for content: String) -> String? {
