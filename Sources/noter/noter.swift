@@ -349,35 +349,41 @@ extension Noter {
                 return nil
             }
             
+            // Get today's date string
+            let dateFormatter = DateFormatter()
+            dateFormatter.dateFormat = "yyyyMMdd"
+            let todayString = dateFormatter.string(from: Date())
+            
             // Get all markdown files in the directory
             let files = try fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.creationDateKey], options: .skipsHiddenFiles)
             
-            // Filter for .md files
-            let mdFiles = files.filter { $0.pathExtension == "md" }
-            guard !mdFiles.isEmpty else {
+            // Filter for .md files with today's date
+            let todayFiles = files.filter { file in
+                guard file.pathExtension == "md" else { return false }
+                let filename = file.deletingPathExtension().lastPathComponent
+                let parts = filename.split(separator: ".")
+                guard parts.count >= 1 else { return false }
+                return String(parts[0]) == todayString
+            }
+            
+            guard !todayFiles.isEmpty else {
+                // No notes for today, return nil to trigger creation of a new note
                 return nil
             }
             
-            // Sort by parsing the filename format: yyyyMMdd.v.md
-            let sortedFiles = mdFiles.sorted { file1, file2 in
+            // Sort by version number to get the most recent
+            let sortedFiles = todayFiles.sorted { file1, file2 in
                 let name1 = file1.deletingPathExtension().lastPathComponent
                 let name2 = file2.deletingPathExtension().lastPathComponent
                 
                 let parts1 = name1.split(separator: ".")
                 let parts2 = name2.split(separator: ".")
                 
-                // Compare date first
-                if parts1.count >= 1 && parts2.count >= 1 {
-                    if parts1[0] != parts2[0] {
-                        return parts1[0] > parts2[0]
-                    }
-                    
-                    // If dates are equal, compare version numbers
-                    if parts1.count >= 2 && parts2.count >= 2,
-                       let v1 = Int(parts1[1]),
-                       let v2 = Int(parts2[1]) {
-                        return v1 > v2
-                    }
+                // Compare version numbers
+                if parts1.count >= 2 && parts2.count >= 2,
+                   let v1 = Int(parts1[1]),
+                   let v2 = Int(parts2[1]) {
+                    return v1 > v2
                 }
                 
                 // Fallback to string comparison
